@@ -38,7 +38,9 @@ router.post('/register', redirectIfAuth, async (req, res) => {
 
   try {
     // Check for duplicates
-    const exists = await User.findOne({ $or: [{ email }, { username }] });
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedUsername = username.trim();
+    const exists = await User.findByEmailOrUsername(normalizedEmail, normalizedUsername);
     if (exists) {
       return res.render('register', { error: 'Username or email already taken.' });
     }
@@ -46,22 +48,23 @@ router.post('/register', redirectIfAuth, async (req, res) => {
     // Generate a random 64-byte WebAuthn user handle (hex)
     const webAuthnUserID = crypto.randomBytes(32).toString('hex');
 
-    const user = new User({
-      username: username.trim(),
-      email: email.trim().toLowerCase(),
-      password: password || null,   // optional
+    const user = await User.create({
+      username: normalizedUsername,
+      email: normalizedEmail,
+      password: password || null,
       webAuthnUserID,
     });
 
-    await user.save();
-
     // Auto-login after registration
-    req.session.userId   = user._id.toString();
+    req.session.userId   = user.id;
     req.session.username = user.username;
 
     res.redirect('/dashboard');
   } catch (err) {
     console.error(err);
+    if (err.code === '23505') {
+      return res.render('register', { error: 'Username or email already taken.' });
+    }
     res.render('register', { error: 'Something went wrong. Please try again.' });
   }
 });
@@ -80,12 +83,12 @@ router.post('/login/password', redirectIfAuth, async (req, res) => {
   }
 
   try {
-    const user = await User.findOne({ email: email.trim().toLowerCase() });
+    const user = await User.findByEmail(email.trim().toLowerCase());
     if (!user || !(await user.comparePassword(password))) {
       return res.render('login', { error: 'Invalid email or password.' });
     }
 
-    req.session.userId   = user._id.toString();
+    req.session.userId   = user.id;
     req.session.username = user.username;
 
     const next = req.query.next || '/dashboard';

@@ -45,12 +45,13 @@ const router = express.Router();
  */
 router.post('/register/options', requireAuth, async (req, res) => {
   try {
-    const user = await User.findById(req.session.userId).populate('passkeys');
+    const user = await User.findById(req.session.userId);
     if (!user) return res.status(404).json({ error: 'User not found' });
+    const passkeys = await Passkey.listForUser(user.id);
 
     // Exclude credentials the user already registered so the
     // browser won't offer a device the user has already added.
-    const excludeCredentials = user.passkeys.map((pk) => ({
+    const excludeCredentials = passkeys.map((pk) => ({
       id:         pk.credentialID,
       type:       'public-key',
       transports: pk.transports,
@@ -123,8 +124,8 @@ router.post('/register/verify', requireAuth, async (req, res) => {
     } = registrationInfo;
 
     // Save the new passkey
-    const passkey = new Passkey({
-      user:               req.session.userId,
+    const passkey = await Passkey.create({
+      userId:             req.session.userId,
       credentialID:       cred.id,
       credentialPublicKey: Buffer.from(cred.publicKey).toString('base64url'),
       credentialAlgorithm: cred.algorithm,
@@ -133,20 +134,13 @@ router.post('/register/verify', requireAuth, async (req, res) => {
       deviceName:         deviceName || 'My Passkey',
     });
 
-    await passkey.save();
-
-    // Link passkey to the user document
-    await User.findByIdAndUpdate(req.session.userId, {
-      $push: { passkeys: passkey._id },
-    });
-
     // Clear challenge from session
     delete req.session.registrationChallenge;
 
     res.json({
       success: true,
       passkey: {
-        id:         passkey._id,
+        id:         passkey.id,
         deviceName: passkey.deviceName,
         createdAt:  passkey.createdAt,
       },
@@ -177,9 +171,10 @@ router.post('/login/options', async (req, res) => {
 
     if (username) {
       // Lookup passkeys for a specific user (username-first flow)
-      const user = await User.findOne({ username: username.trim() }).populate('passkeys');
+      const user = await User.findByUsername(username.trim());
       if (user) {
-        allowCredentials = user.passkeys.map((pk) => ({
+        const passkeys = await Passkey.listForUser(user.id);
+        allowCredentials = passkeys.map((pk) => ({
           id:         pk.credentialID,
           type:       'public-key',
           transports: pk.transports,
@@ -224,9 +219,13 @@ router.post('/login/verify', async (req, res) => {
 
   try {
     // Find the passkey by credential ID
-    const passkey = await Passkey.findOne({ credentialID: credential.id }).populate('user');
+    const passkey = await Passkey.findByCredentialID(credential.id);
     if (!passkey) {
       return res.status(400).json({ error: 'Passkey not found.' });
+    }
+    const user = await User.findById(passkey.userId);
+    if (!user) {
+      return res.status(400).json({ error: 'Passkey owner not found.' });
     }
 
     const verification = await verifyAuthenticationResponse({
@@ -250,13 +249,14 @@ router.post('/login/verify', async (req, res) => {
     }
 
     // Update counter (replay-attack protection)
-    passkey.counter    = authenticationInfo.newCounter;
-    passkey.lastUsedAt = new Date();
-    await passkey.save();
+    await Passkey.updateAuthentication(
+      passkey.id,
+      authenticationInfo.newCounter,
+      new Date().toISOString()
+    );
 
     // Create authenticated session
-    const user = passkey.user;
-    req.session.userId   = user._id.toString();
+    req.session.userId   = user.id;
     req.session.username = user.username;
 
     delete req.session.authChallenge;
@@ -283,14 +283,14 @@ router.patch('/:id/rename', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Device name is required.' });
     }
 
-    const passkey = await Passkey.findOneAndUpdate(
-      { _id: req.params.id, user: req.session.userId },
-      { deviceName: deviceName.trim() },
-      { new: true }
+    const renamedDevice = await Passkey.renameOwned(
+      req.params.id,
+      req.session.userId,
+      deviceName.trim()
     );
 
-    if (!passkey) return res.status(404).json({ error: 'Passkey not found.' });
-    res.json({ success: true, deviceName: passkey.deviceName });
+    if (renamedDevice === null) return res.status(404).json({ error: 'Passkey not found.' });
+    res.json({ success: true, deviceName: renamedDevice });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -303,26 +303,19 @@ router.patch('/:id/rename', requireAuth, async (req, res) => {
  */
 router.delete('/:id', requireAuth, async (req, res) => {
   try {
-    const user = await User.findById(req.session.userId).populate('passkeys');
+    const user = await User.findById(req.session.userId);
     if (!user) return res.status(404).json({ error: 'User not found.' });
+    const passkeys = await Passkey.listForUser(user.id);
 
     // Safety: don't let users lock themselves out
-    if (user.passkeys.length <= 1 && !user.password) {
+    if (passkeys.length <= 1 && !user.password) {
       return res.status(400).json({
         error: 'Cannot remove your last passkey when you have no password set.',
       });
     }
 
-    const passkey = await Passkey.findOneAndDelete({
-      _id: req.params.id,
-      user: req.session.userId,
-    });
-
-    if (!passkey) return res.status(404).json({ error: 'Passkey not found.' });
-
-    await User.findByIdAndUpdate(req.session.userId, {
-      $pull: { passkeys: passkey._id },
-    });
+    const deleted = await Passkey.deleteOwned(req.params.id, user.id);
+    if (!deleted) return res.status(404).json({ error: 'Passkey not found.' });
 
     res.json({ success: true });
   } catch (err) {

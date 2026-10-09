@@ -75,12 +75,12 @@
       <% } else { %>
         <ul class="passkeys-list" id="passkeys-list">
           <% passkeys.forEach(pk => { %>
-            <li class="passkey-item" id="pk-<%= pk._id %>">
+            <li class="passkey-item" id="pk-<%= pk.id %>">
               <div class="passkey-icon-wrap">
                 <i data-lucide="key-round"></i>
               </div>
               <div class="passkey-info">
-                <span class="passkey-name" id="pk-name-<%= pk._id %>"><%= pk.deviceName %></span>
+                <span class="passkey-name" id="pk-name-<%= pk.id %>"><%= pk.deviceName %></span>
                 <span class="passkey-meta">
                   Added <%= new Date(pk.createdAt).toLocaleDateString() %>
                   <% if (pk.lastUsedAt) { %>
@@ -91,7 +91,7 @@
               <div class="passkey-actions">
                 <button
                   class="btn btn-ghost btn-xs"
-                  onclick="renamePasskey('<%= pk._id %>', '<%= pk.deviceName %>')"
+                  onclick="renamePasskey('<%= pk.id %>', '<%= pk.deviceName %>')"
                   title="Rename passkey"
                 >
                   <i data-lucide="pencil" class="icon"></i>
@@ -99,7 +99,7 @@
                 </button>
                 <button
                   class="btn btn-danger btn-xs"
-                  onclick="deletePasskey('<%= pk._id %>')"
+                  onclick="deletePasskey('<%= pk.id %>')"
                   title="Remove passkey"
                 >
                   <i data-lucide="trash-2" class="icon"></i>

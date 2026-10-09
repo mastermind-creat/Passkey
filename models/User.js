@@ -1,63 +1,84 @@
-// models/User.js – User document schema
 'use strict';
 
-const mongoose = require('mongoose');
-const bcrypt   = require('bcryptjs');
+const bcrypt = require('bcryptjs');
+const { supabase } = require('../config/db');
 
-const userSchema = new mongoose.Schema(
-  {
-    // ── Identity ──────────────────────────────────────────────
-    username: {
-      type: String,
-      required: true,
-      unique: true,
-      trim: true,
-      minlength: 3,
-      maxlength: 64,
-    },
-    email: {
-      type: String,
-      required: true,
-      unique: true,
-      trim: true,
-      lowercase: true,
-    },
-
-    // ── Optional password (fallback login) ────────────────────
-    // Users who register via passkey only will have no password.
-    password: {
-      type: String,
-      default: null,
-    },
-
-    // ── WebAuthn user handle ──────────────────────────────────
-    // A random, unique, opaque byte-string used by the authenticator.
-    // Stored as a hex string. Must never be re-used across accounts.
-    webAuthnUserID: {
-      type: String,   // hex-encoded Uint8Array
-      required: true,
-      unique: true,
-    },
-
-    // ── Passkeys (one user can register multiple devices) ─────
-    // Each element is a Passkey subdocument (see models/Passkey.js)
-    // We embed them here for fast lookup during authentication.
-    passkeys: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Passkey' }],
-  },
-  { timestamps: true }
-);
-
-// ── Hash password before save ─────────────────────────────────
-userSchema.pre('save', async function (next) {
-  if (!this.isModified('password') || !this.password) return next();
-  this.password = await bcrypt.hash(this.password, 12);
-  next();
+const mapUser = (row) => row && ({
+  id: row.id,
+  username: row.username,
+  email: row.email,
+  password: row.password_hash,
+  webAuthnUserID: row.webauthn_user_id,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
 });
 
-// ── Instance method: compare plaintext to hash ────────────────
-userSchema.methods.comparePassword = function (plain) {
-  if (!this.password) return Promise.resolve(false);
-  return bcrypt.compare(plain, this.password);
+const findById = async (id) => {
+  const { data, error } = await supabase
+    .from('users')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  return mapUser(data);
 };
 
-module.exports = mongoose.model('User', userSchema);
+const findByEmail = async (email) => {
+  const { data, error } = await supabase
+    .from('users')
+    .select('*')
+    .eq('email', email)
+    .maybeSingle();
+  if (error) throw error;
+  return mapUser(data);
+};
+
+const findByUsername = async (username) => {
+  const { data, error } = await supabase
+    .from('users')
+    .select('*')
+    .eq('username', username)
+    .maybeSingle();
+  if (error) throw error;
+  return mapUser(data);
+};
+
+const findByEmailOrUsername = async (email, username) => {
+  const [emailMatch, usernameMatch] = await Promise.all([
+    supabase.from('users').select('id').eq('email', email).maybeSingle(),
+    supabase.from('users').select('id').eq('username', username).maybeSingle(),
+  ]);
+  if (emailMatch.error) throw emailMatch.error;
+  if (usernameMatch.error) throw usernameMatch.error;
+  return Boolean(emailMatch.data || usernameMatch.data);
+};
+
+const create = async ({ username, email, password, webAuthnUserID }) => {
+  const passwordHash = password ? await bcrypt.hash(password, 12) : null;
+  const { data, error } = await supabase
+    .from('users')
+    .insert({
+      username,
+      email,
+      password_hash: passwordHash,
+      webauthn_user_id: webAuthnUserID,
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return mapUser(data);
+};
+
+const comparePassword = (user, plain) => {
+  if (!user.password) return Promise.resolve(false);
+  return bcrypt.compare(plain, user.password);
+};
+
+module.exports = {
+  findById,
+  findByEmail,
+  findByUsername,
+  findByEmailOrUsername,
+  create,
+  comparePassword,
+};

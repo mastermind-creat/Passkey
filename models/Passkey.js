@@ -1,73 +1,104 @@
-// models/Passkey.js – Registered authenticator credential schema
-//
-// Each row corresponds to ONE passkey (one device / platform authenticator).
-// A single user can have many passkeys (phone, laptop, YubiKey, etc.)
 'use strict';
 
-const mongoose = require('mongoose');
+const { supabase } = require('../config/db');
 
-const passkeySchema = new mongoose.Schema(
-  {
-    // ── Owner ─────────────────────────────────────────────────
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
-      index: true,
-    },
+const mapPasskey = (row) => row && ({
+  id: row.id,
+  userId: row.user_id,
+  credentialID: row.credential_id,
+  credentialPublicKey: row.credential_public_key,
+  credentialAlgorithm: row.credential_algorithm,
+  counter: row.counter,
+  transports: row.transports || [],
+  deviceName: row.device_name,
+  lastUsedAt: row.last_used_at,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+});
 
-    // ── WebAuthn fields ───────────────────────────────────────
+const listForUser = async (userId) => {
+  const { data, error } = await supabase
+    .from('passkeys')
+    .select('*')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return data.map(mapPasskey);
+};
 
-    // Credential ID returned by the authenticator (base64url string)
-    credentialID: {
-      type: String,
-      required: true,
-      unique: true,
-      index: true,
-    },
+const create = async ({
+  userId,
+  credentialID,
+  credentialPublicKey,
+  credentialAlgorithm,
+  counter,
+  transports,
+  deviceName,
+}) => {
+  const { data, error } = await supabase
+    .from('passkeys')
+    .insert({
+      user_id: userId,
+      credential_id: credentialID,
+      credential_public_key: credentialPublicKey,
+      credential_algorithm: credentialAlgorithm,
+      counter,
+      transports,
+      device_name: deviceName,
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return mapPasskey(data);
+};
 
-    // Public key in COSE format (base64url encoded)
-    credentialPublicKey: {
-      type: String,
-      required: true,
-    },
+const findByCredentialID = async (credentialID) => {
+  const { data, error } = await supabase
+    .from('passkeys')
+    .select('*')
+    .eq('credential_id', credentialID)
+    .maybeSingle();
+  if (error) throw error;
+  return mapPasskey(data);
+};
 
-    // Algorithm used (e.g. -7 = ES256, -257 = RS256)
-    credentialAlgorithm: {
-      type: Number,
-      required: true,
-    },
+const updateAuthentication = async (id, counter, lastUsedAt) => {
+  const { error } = await supabase
+    .from('passkeys')
+    .update({ counter, last_used_at: lastUsedAt })
+    .eq('id', id);
+  if (error) throw error;
+};
 
-    // Signature counter – incremented on each use.
-    // Used to detect authenticator cloning attacks.
-    counter: {
-      type: Number,
-      required: true,
-      default: 0,
-    },
+const renameOwned = async (id, userId, deviceName) => {
+  const { data, error } = await supabase
+    .from('passkeys')
+    .update({ device_name: deviceName })
+    .eq('id', id)
+    .eq('user_id', userId)
+    .select('device_name')
+    .maybeSingle();
+  if (error) throw error;
+  return data ? data.device_name : null;
+};
 
-    // Transports reported by the authenticator (e.g. ['internal', 'hybrid'])
-    transports: {
-      type: [String],
-      default: [],
-    },
+const deleteOwned = async (id, userId) => {
+  const { data, error } = await supabase
+    .from('passkeys')
+    .delete()
+    .eq('id', id)
+    .eq('user_id', userId)
+    .select('id')
+    .maybeSingle();
+  if (error) throw error;
+  return Boolean(data);
+};
 
-    // ── UX metadata ───────────────────────────────────────────
-
-    // Friendly name the user can give this passkey
-    deviceName: {
-      type: String,
-      default: 'My Passkey',
-      maxlength: 64,
-    },
-
-    // Last time this passkey was used to sign in
-    lastUsedAt: {
-      type: Date,
-      default: null,
-    },
-  },
-  { timestamps: true }
-);
-
-module.exports = mongoose.model('Passkey', passkeySchema);
+module.exports = {
+  listForUser,
+  create,
+  findByCredentialID,
+  updateAuthentication,
+  renameOwned,
+  deleteOwned,
+};

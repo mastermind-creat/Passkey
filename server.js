@@ -1,6 +1,6 @@
 // ============================================================
 //  server.js – Entry point
-//  Passkey (WebAuthn) Auth Demo  |  Express + EJS + MongoDB
+//  Passkey (WebAuthn) Auth Demo  |  Express + EJS + Supabase
 // ============================================================
 'use strict';
 
@@ -8,19 +8,17 @@ require('dotenv').config();
 
 const express      = require('express');
 const session      = require('express-session');
-const MongoStore   = require('connect-mongo');
+const PgSession    = require('connect-pg-simple')(session);
+const { Pool }      = require('pg');
 const methodOverride = require('method-override');
 const path         = require('path');
 
-const connectDB    = require('./config/db');
+const { connectDB } = require('./config/db');
 const authRoutes   = require('./routes/auth');
 const passkeyRoutes = require('./routes/passkeys');
 const dashboardRoutes = require('./routes/dashboard');
 
 const app = express();
-
-// ── Database ─────────────────────────────────────────────────
-connectDB();
 
 // ── View engine ───────────────────────────────────────────────
 app.set('view engine', 'ejs');
@@ -35,14 +33,21 @@ app.use(express.urlencoded({ extended: true }));
 app.use(methodOverride('_method'));
 
 // ── Session ───────────────────────────────────────────────────
+if (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 32) {
+  throw new Error('SESSION_SECRET must contain at least 32 characters.');
+}
+if (!process.env.DATABASE_URL) {
+  throw new Error('DATABASE_URL must be configured for Supabase Postgres sessions.');
+}
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'dev_secret',
+  secret: process.env.SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
-  store: MongoStore.create({
-    mongoUrl: process.env.MONGODB_URI,
-    collectionName: 'sessions',
-    ttl: 60 * 60 * 24 * 7,   // 7 days
+  store: new PgSession({
+    pool,
+    tableName: 'express_sessions',
   }),
   cookie: {
     httpOnly: true,
@@ -75,6 +80,16 @@ app.use((err, _req, res, _next) => {
 
 // ── Start ─────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`✅  Server running → http://localhost:${PORT}`);
+
+const start = async () => {
+  await connectDB();
+  await pool.query('SELECT 1');
+  app.listen(PORT, () => {
+    console.log(`Server running at http://localhost:${PORT}`);
+  });
+};
+
+start().catch((err) => {
+  console.error('Application startup failed:', err);
+  process.exitCode = 1;
 });
