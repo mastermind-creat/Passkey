@@ -1,0 +1,70 @@
+<%- include('partials/head', { title: 'Login – PasskeyDemo' }) %>
+<body class="auth-page">
+  <%- include('partials/bg-blobs') %>
+
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div class="logo-icon">
+        <i data-lucide="key-round"></i>
+      </div>
+      <h1>Welcome back</h1>
+      <p class="subtitle">Sign in with a passkey or your password</p>
+    </div>
+
+    <% if (error) { %>
+      <div class="alert alert-error">
+        <i data-lucide="alert-circle" class="alert-icon"></i>
+        <%= error %>
+      </div>
+    <% } %>
+
+    <!-- ── Passkey login (primary) ─────────────────── -->
+    <button id="btn-passkey-login" class="btn btn-primary btn-passkey">
+      <i data-lucide="fingerprint" class="icon"></i>
+      Sign in with a Passkey
+    </button>
+
+    <div class="divider"><span>or continue with password</span></div>
+
+    <!-- ── Password fallback ──────────────────────── -->
+    <form action="/login/password" method="POST" id="form-password" autocomplete="on">
+      <div class="field">
+        <label for="email">Email address</label>
+        <div class="input-wrap">
+          <i data-lucide="mail" class="input-icon"></i>
+          <input
+            id="email"
+            name="email"
+            type="email"
+            autocomplete="email webauthn"
+            placeholder="you@example.com"
+            required
+          />
+        </div>
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <div class="input-wrap">
+          <i data-lucide="lock" class="input-icon"></i>
+          <input
+            id="password"
+            name="password"
+            type="password"
+            autocomplete="current-password"
+            placeholder="••••••••"
+            required
+          />
+        </div>
+      </div>
+      <button type="submit" class="btn btn-secondary">
+        <i data-lucide="log-in" class="icon"></i>
+        Sign in with Password
+      </button>
+    </form>
+
+    <p class="auth-switch">Don't have an account? <a href="/register">Register</a></p>
+  </div>
+
+  <script type="module" src="/js/passkey-login.js"></script>
+</body>
+</html>
