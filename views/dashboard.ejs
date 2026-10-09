@@ -91,7 +91,8 @@
               <div class="passkey-actions">
                 <button
                   class="btn btn-ghost btn-xs"
-                  onclick="renamePasskey('<%= pk.id %>', '<%= pk.deviceName %>')"
+                  data-passkey-action="rename"
+                  data-passkey-id="<%= pk.id %>"
                   title="Rename passkey"
                 >
                   <i data-lucide="pencil" class="icon"></i>
@@ -99,7 +100,8 @@
                 </button>
                 <button
                   class="btn btn-danger btn-xs"
-                  onclick="deletePasskey('<%= pk.id %>')"
+                  data-passkey-action="delete"
+                  data-passkey-id="<%= pk.id %>"
                   title="Remove passkey"
                 >
                   <i data-lucide="trash-2" class="icon"></i>
@@ -127,6 +129,7 @@
         </button>
       </div>
       <div class="modal-body">
+        <div id="modal-alert"></div>
         <div class="field">
           <label for="device-name">Device name</label>
           <div class="input-wrap">

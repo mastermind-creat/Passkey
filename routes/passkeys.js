@@ -23,6 +23,7 @@ const {
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
 } = require('@simplewebauthn/server');
+const { decodeCredentialPublicKey } = require('@simplewebauthn/server/helpers');
 
 const User    = require('../models/User');
 const Passkey = require('../models/Passkey');
@@ -60,7 +61,7 @@ router.post('/register/options', requireAuth, async (req, res) => {
     const options = await generateRegistrationOptions({
       rpName,
       rpID,
-      userID:               Buffer.from(user.webAuthnUserID, 'hex'),
+      userID:               user.webAuthnUserID,
       userName:             user.username,
       userDisplayName:      user.username,
       attestationType:      'none',          // 'none' = no hardware attestation
@@ -117,19 +118,20 @@ router.post('/register/verify', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'Verification failed.' });
     }
 
-    const {
-      credential: cred,
-      credentialDeviceType,
-      credentialBackedUp,
-    } = registrationInfo;
+    const credentialID = Buffer.from(registrationInfo.credentialID).toString('base64url');
+    const credentialPublicKey = registrationInfo.credentialPublicKey;
+    const credentialAlgorithm = decodeCredentialPublicKey(credentialPublicKey).get(3);
+    if (!Number.isInteger(credentialAlgorithm)) {
+      throw new Error('Verified credential has no valid COSE algorithm.');
+    }
 
     // Save the new passkey
     const passkey = await Passkey.create({
       userId:             req.session.userId,
-      credentialID:       cred.id,
-      credentialPublicKey: Buffer.from(cred.publicKey).toString('base64url'),
-      credentialAlgorithm: cred.algorithm,
-      counter:            cred.counter,
+      credentialID,
+      credentialPublicKey: Buffer.from(credentialPublicKey).toString('base64url'),
+      credentialAlgorithm,
+      counter:            registrationInfo.counter,
       transports:         credential.response?.transports || [],
       deviceName:         deviceName || 'My Passkey',
     });
@@ -234,9 +236,9 @@ router.post('/login/verify', async (req, res) => {
       expectedOrigin:        origin,
       expectedRPID:          rpID,
       requireUserVerification: true,
-      credential: {
-        id:         passkey.credentialID,
-        publicKey:  Buffer.from(passkey.credentialPublicKey, 'base64url'),
+      authenticator: {
+        credentialID: Buffer.from(passkey.credentialID, 'base64url'),
+        credentialPublicKey: Buffer.from(passkey.credentialPublicKey, 'base64url'),
         counter:    passkey.counter,
         transports: passkey.transports,
       },
